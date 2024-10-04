@@ -106,6 +106,13 @@ thread_init (void)
 }
 
 /* Lab 1-1. Functions added */
+bool compare_tick_wakeup (const struct list_elem *e1, const struct list_elem *e2, void *aux)
+{
+  struct thread* thread1 = list_entry(e1, struct thread, elem);
+  struct thread* thread2 = list_entry(e2, struct thread, elem);
+  return thread1->tick_wakeup < thread2->tick_wakeup; // if thread1 has less wakeup tick, return true
+}
+
 void
 thread_sleep(int64_t tick)
 {
@@ -118,29 +125,28 @@ thread_sleep(int64_t tick)
   ASSERT (current != idle_thread); // ensure the current thread is not idle thread
 
   current->tick_wakeup = tick; // store the wakeup tick
-  list_push_back(&sleep_list, &current->elem); // add to the sleep list
+  list_insert_ordered(&sleep_list, &current->elem, compare_tick_wakeup, NULL); // add to the sleep list, list_insert_ordered
   thread_block(); // block the current thread
 
   intr_set_level(old); // re-enable interrupts
+}
 
 void
 thread_awake(int64_t tick)
 {
   struct list_elem *now_e; // element to check for wakeup tick
-  for(now_e = list_begin(&sleep_list); now_e != list_end(&sleep_list); )
+  for(now_e = list_begin(&sleep_list); now_e != list_end(&sleep_list); ) // traverse the sleep_list
   {
     struct thread *now_t; 
     now_t = list_entry(now_e, struct thread, elem); // access the thread structure from the list element
 
     if(now_t->tick_wakeup > tick) // if it's not time to wake up yet
     {
-      now_e = list_next(now_e); // move to the next element
+      break;  // move to the next element
     }
-    else // time to wake up
-    {
-      now_e = list_remove(now_e); // remove from the sleep list
-      thread_unblock(now_t); // unblock the thread
-    }
+    // we should awake this thread
+    now_e = list_remove(now_e); // remove from the sleep list
+    thread_unblock(now_t); // unblock the thread
   }
 }
 
@@ -264,6 +270,7 @@ thread_block (void)
   schedule ();
 }
 
+/* Lab 1-2. Function edited */
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -281,7 +288,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_push_back (&ready_list, &t->elem); // list_insert_ordered
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -340,6 +347,7 @@ thread_exit (void)
   NOT_REACHED ();
 }
 
+/* Lab 1-2. Function edited */
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
@@ -352,7 +360,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_push_back (&ready_list, &cur->elem); // list_insert_ordered
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
