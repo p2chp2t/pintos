@@ -122,14 +122,11 @@ void thread_awake(int64_t tick);
 // 1-2. Priority scheduler
 bool compare_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void thread_yield_on_priority(void);
-<<<<<<< HEAD
 
 bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void priority_donation(void);
 void delete_from_donation_list(struct lock* lock);
 void priority_update(void);
-=======
->>>>>>> d7d6dbe5b35a85cb5fe0a00d6e9c086ecce8b772
 // END Lab 1. New functions implemented
 
 
