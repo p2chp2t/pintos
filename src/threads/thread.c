@@ -135,16 +135,21 @@ bool compare_priority(const struct list_elem *e1, const struct list_elem *e2, vo
 void thread_yield_on_priority(void)
 {
   int current_priority = thread_get_priority();
+<<<<<<< HEAD
   if(list_empty(&ready_list)) {
     return;
   }
   else {
+=======
+  if(!list_empty(&ready_list)) {
+>>>>>>> d7d6dbe5b35a85cb5fe0a00d6e9c086ecce8b772
     int highest_priority_ready = list_entry(list_front(&ready_list), struct thread, elem)->priority;
     if(highest_priority_ready > current_priority) {
       thread_yield();
     }
   }
 }
+<<<<<<< HEAD
 
 // Donate if current thread has higher priority than holder of its waiting lock.
 void priority_donation(void)
@@ -204,6 +209,8 @@ void priority_update(void)
   }
 }
 
+=======
+>>>>>>> d7d6dbe5b35a85cb5fe0a00d6e9c086ecce8b772
 // END Lab 1. New functions implemented
 
 // Lab 1-1. Function edited 
@@ -481,8 +488,11 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+<<<<<<< HEAD
 
   priority_update();
+=======
+>>>>>>> d7d6dbe5b35a85cb5fe0a00d6e9c086ecce8b772
   thread_yield_on_priority(); // Lab 1-2. 
 }
 
