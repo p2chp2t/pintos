@@ -134,13 +134,13 @@ bool compare_priority(const struct list_elem *e1, const struct list_elem *e2, vo
 // If current thread's priority is lower, call thread_yield() and yield CPU */
 void thread_yield_on_priority(void)
 {
-  int current_priority = thread_get_priority();
   if(list_empty(&ready_list)) {
     return;
   }
   else {
-    int highest_priority_ready = list_entry(list_front(&ready_list), struct thread, elem)->priority;
-    if(highest_priority_ready > current_priority) {
+    struct thread *cur = thread_current();
+    struct thread *ready = list_entry(list_front(&ready_list), struct thread, elem);
+    if(ready->priority > cur->priority) {
       thread_yield();
     }
   }
@@ -152,18 +152,17 @@ void priority_donation(void)
   struct thread *current_t = thread_current();
   int depth = 0;
   
-  while(depth < 8) {
+  for(depth = 0; depth < 8; depth++) {
     if(current_t->waiting_lock == NULL) {
-      return;
+      break;
     }
     else {
-      struct thread *holder_t = (current_t->waiting_lock)->holder;
+      struct thread *holder_t = current_t->waiting_lock->holder;
       if(current_t->priority > holder_t->priority) { 
         holder_t->priority = current_t->priority;
       }
       current_t = holder_t;
     }
-    depth++;
   }
 }
 
@@ -174,12 +173,12 @@ void delete_from_donation_list(struct lock* lock)
   struct list_elem *e;
   struct thread *t;
 
-  for(e = list_begin(&current_t->donation_list); e != list_end(&current_t->donation_list); )
+  for(e = list_begin(&current_t->donation_list); e != list_end(&current_t->donation_list); e = list_next(e))
   {
     t = list_entry(e, struct thread, donation_elem);
     if(t->waiting_lock == lock) 
     {
-      e = list_remove(e);
+      list_remove(e);
     }
   }
 }
@@ -197,10 +196,7 @@ void priority_update(void)
   else {
     list_sort(&current_t->donation_list, compare_priority, NULL);
     struct thread *dona_head_t = list_entry(list_begin(&current_t->donation_list), struct thread, donation_elem);
-    if(dona_head_t->priority > current_t->priority) 
-    {
-      current_t->priority = dona_head_t->priority;
-    }
+    current_t->priority = dona_head_t->priority;
   }
 }
 
@@ -237,6 +233,7 @@ thread_init (void)
   initial_thread->tid = allocate_tid ();
 }
 
+// Lab 1-3. Function edited
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void
@@ -480,12 +477,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-<<<<<<< HEAD
+  thread_current ()->org_priority = new_priority;
 
   priority_update();
-=======
->>>>>>> d7d6dbe5b35a85cb5fe0a00d6e9c086ecce8b772
   thread_yield_on_priority(); // Lab 1-2. 
 }
 
@@ -621,6 +615,10 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->donation_list);
   t->waiting_lock = NULL;
   // END Lab 1-2.
+
+  // Lab 1-3.
+  
+  // END Lab 1-3.
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

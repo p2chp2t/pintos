@@ -208,7 +208,7 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   // Lab 1-2.
-  if(lock->holder != NULL) {
+  if(lock->holder) {
     thread_current()->waiting_lock = lock;
     list_insert_ordered(&lock->holder->donation_list, &thread_current()->donation_elem, compare_priority, NULL);
     priority_donation();
@@ -216,6 +216,7 @@ lock_acquire (struct lock *lock)
   // END Lab 1-2.
 
   sema_down (&lock->semaphore);
+  thread_current()->waiting_lock = NULL;
   lock->holder = thread_current ();
 }
 
@@ -375,12 +376,14 @@ bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e
   struct semaphore_elem *sema1 = list_entry(e1, struct semaphore_elem, elem);
   struct semaphore_elem *sema2 = list_entry(e2, struct semaphore_elem, elem);
 
-  struct list_elem *sema1_head_waiter = list_begin(&(sema1->semaphore.waiters));
-  struct list_elem *sema2_head_waiter = list_begin(&(sema2->semaphore.waiters)); 
+  struct list *waiter_sema1 = &(sema1->semaphore.waiters);
+	struct list *waiter_sema2 = &(sema2->semaphore.waiters);
 
-  struct thread *sema1_head_thread = list_entry(sema1_head_waiter, struct thread, elem);
-  struct thread *sema2_head_thread = list_entry(sema2_head_waiter, struct thread, elem);
+  if(list_empty(waiter_sema1)) return false;
+  if(list_empty(waiter_sema2)) return true;
 
-  return (sema1_head_thread->priority) > (sema2_head_thread->priority);
+  int priority1 = list_entry(list_begin(waiter_sema1), struct thread, elem)->priority;
+  int priority2 = list_entry(list_begin(waiter_sema2), struct thread, elem)->priority;
+  return priority1 > priority2;
 }
 // END Lab 1. New functions implemented

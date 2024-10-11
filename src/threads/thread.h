@@ -107,6 +107,9 @@ struct thread
    struct list donation_list;
    struct list_elem donation_elem;
    struct lock *waiting_lock;
+
+   // Lab 1-3. Variable added
+   
   };
 
 /* If false (default), use round-robin scheduler.
@@ -119,14 +122,16 @@ extern bool thread_mlfqs;
 bool compare_tick_wakeup(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void thread_sleep(int64_t tick);
 void thread_awake(int64_t tick);
+
 // 1-2. Priority scheduler
 bool compare_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void thread_yield_on_priority(void);
 
-bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void priority_donation(void);
-void delete_from_donation_list(struct lock* lock);
+void delete_from_donation_list(struct lock *lock);
 void priority_update(void);
+
+// 1-3. Advaced scheduler
 // END Lab 1. New functions implemented
 
 
