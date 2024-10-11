@@ -41,6 +41,11 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
+// Lab 1. New functions implemented
+// 1-2. Priority scheduler
+bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
+// END Lab 1. New functions implemented
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an

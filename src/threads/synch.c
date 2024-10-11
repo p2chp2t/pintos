@@ -50,6 +50,7 @@ sema_init (struct semaphore *sema, unsigned value)
   list_init (&sema->waiters);
 }
 
+// Lab 1-2. Fuction edited
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -68,7 +69,8 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      //list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current()->elem, compare_priority, NULL); // Lab 1-2.
       thread_block ();
     }
   sema->value--;
@@ -101,6 +103,7 @@ sema_try_down (struct semaphore *sema)
   return success;
 }
 
+// Lab 1-2. Function edited
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
@@ -114,9 +117,16 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  {
+    /*thread_unblock (list_entry (list_pop_front (&sema->waiters),
+                                struct thread, elem));*/
+    list_sort(&sema->waiters, compare_priority, NULL); // Lab 1-2.
+    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem)); // Lab 1-2.
+  }
   sema->value++;
+  
+  thread_yield_on_priority(); // Lab 1-2.
+
   intr_set_level (old_level);
 }
 
@@ -181,6 +191,7 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+// Lab 1-2. Function edited
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -195,6 +206,14 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+
+  // Lab 1-2.
+  if(lock->holder != NULL) {
+    thread_current()->waiting_lock = lock;
+    list_insert_ordered(&lock->holder->donation_list, &thread_current()->donation_elem, compare_priority, NULL);
+    priority_donation();
+  }
+  // END Lab 1-2.
 
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
@@ -231,6 +250,10 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  // Lab 1-2.
+  delete_from_donation_list(lock);
+  priority_update();
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
@@ -264,6 +287,7 @@ cond_init (struct condition *cond)
   list_init (&cond->waiters);
 }
 
+// Lab 1-2. Function edited
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -295,12 +319,14 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  //list_push_back (&cond->waiters, &waiter.elem);
+  list_insert_ordered(&cond->waiters, &waiter.elem, compare_sema_priority, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
 }
 
+// Lab 1-2. Function edited
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
    LOCK must be held before calling this function.
@@ -316,9 +342,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
+  if (!list_empty (&cond->waiters)) {
+    list_sort(&cond->waiters, compare_sema_priority, NULL); // Lab 1-2.
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -336,3 +364,23 @@ cond_broadcast (struct condition *cond, struct lock *lock)
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
 }
+
+
+// Lab 1. New functions implemented
+// 1-2. Priority scheduler
+// Compare priority of two semaphore's waiter's head thread.
+// If first one has higher priority return true, otw false.
+bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux)
+{
+  struct semaphore_elem *sema1 = list_entry(e1, struct semaphore_elem, elem);
+  struct semaphore_elem *sema2 = list_entry(e2, struct semaphore_elem, elem);
+
+  struct list_elem *sema1_head_waiter = list_begin(&(sema1->semaphore.waiters));
+  struct list_elem *sema2_head_waiter = list_begin(&(sema2->semaphore.waiters)); 
+
+  struct thread *sema1_head_thread = list_entry(sema1_head_waiter, struct thread, elem);
+  struct thread *sema2_head_thread = list_entry(sema2_head_waiter, struct thread, elem);
+
+  return (sema1_head_thread->priority) > (sema2_head_thread->priority);
+}
+// END Lab 1. New functions implemented

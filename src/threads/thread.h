@@ -89,7 +89,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
-    /* Lab 1-1. Variable added */
+    // Lab 1-1. Variable added 
     int64_t tick_wakeup;                /* the tick time when the thread should wake up */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -101,6 +101,12 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+   
+   // Lab 1-2. Variable added (for priority donation)
+   int org_priority;
+   struct list donation_list;
+   struct list_elem donation_elem;
+   struct lock *waiting_lock;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -108,9 +114,21 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
-/* Lab 1-1. Functions added */
+// Lab 1. New functions implemented
+// 1-1. Alarm clock
+bool compare_tick_wakeup(const struct list_elem *e1, const struct list_elem *e2, void *aux);
 void thread_sleep(int64_t tick);
 void thread_awake(int64_t tick);
+// 1-2. Priority scheduler
+bool compare_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
+void thread_yield_on_priority(void);
+
+bool compare_sema_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux);
+void priority_donation(void);
+void delete_from_donation_list(struct lock* lock);
+void priority_update(void);
+// END Lab 1. New functions implemented
+
 
 void thread_init (void);
 void thread_start (void);
