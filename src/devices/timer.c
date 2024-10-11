@@ -84,7 +84,7 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
-/* Lab 1-1. Function edited */
+// Lab 1-1. Function edited
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
@@ -167,14 +167,14 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* Lab 1-1. Function edited */
+// Lab 1-1. Function edited 
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  thread_awake(ticks);
+  thread_awake(ticks); // Lab 1-1.
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
