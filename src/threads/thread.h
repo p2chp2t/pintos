@@ -109,7 +109,8 @@ struct thread
    struct lock *waiting_lock;
 
    // Lab 1-3. Variable added
-   
+   int nice;
+   int recent_cpu;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -131,7 +132,11 @@ void priority_donation(void);
 void delete_from_donation_list(struct lock *lock);
 void priority_update(void);
 
-// 1-3. Advaced scheduler
+// 1-3. Advanced scheduler
+void mlfqs_priority(void);
+void mlfqs_recent_cpu(void);
+void mlfqs_recent_cpu_increase(void);
+void mlfqs_load_avg(void);
 // END Lab 1. New functions implemented
 
 

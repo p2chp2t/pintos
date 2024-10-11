@@ -191,7 +191,7 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
-// Lab 1-2. Function edited
+// Lab 1-2. & 1-3. Function edited
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -207,16 +207,19 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  // Lab 1-2.
-  if(lock->holder) {
-    thread_current()->waiting_lock = lock;
-    list_insert_ordered(&lock->holder->donation_list, &thread_current()->donation_elem, compare_priority, NULL);
-    priority_donation();
+  // Lab 1-2. & 1-3.
+  if(!thread_mlfqs){
+    if(lock->holder) {
+      thread_current()->waiting_lock = lock;
+      list_insert_ordered(&lock->holder->donation_list, &thread_current()->donation_elem, compare_priority, NULL);
+      priority_donation();
+    }
   }
-  // END Lab 1-2.
 
   sema_down (&lock->semaphore);
-  thread_current()->waiting_lock = NULL;
+  if(!thread_mlfqs){
+    thread_current()->waiting_lock = NULL;
+  }
   lock->holder = thread_current ();
 }
 
@@ -240,6 +243,7 @@ lock_try_acquire (struct lock *lock)
   return success;
 }
 
+// Lab 1-2. & 1-3. Function edited
 /* Releases LOCK, which must be owned by the current thread.
 
    An interrupt handler cannot acquire a lock, so it does not
@@ -251,10 +255,11 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  // Lab 1-2.
-  delete_from_donation_list(lock);
-  priority_update();
-
+  // Lab 1-2. & 1-3.
+  if(!thread_mlfqs){
+    delete_from_donation_list(lock);
+    priority_update();
+  }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

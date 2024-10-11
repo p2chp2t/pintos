@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "threads/fixed_point_operation.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -41,6 +42,8 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+int load_avg;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -200,6 +203,41 @@ void priority_update(void)
   }
 }
 
+// 1-3. Advanced scheduler
+void mlfqs_priority(void) {
+  struct list_elem *e;
+  for(e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+    struct thread* now = list_entry(e, struct thread, allelem);
+    if(now != idle_thread){
+      now->priority = sub_x_y(sub_x_y(PRI_MAX, x_to_int_nearest(div_x_n(now->recent_cpu, 4))), mul_x_n(now->nice, 2));
+    }
+  }
+}
+
+void mlfqs_recent_cpu(void) {
+  struct list_elem *e;
+  for(e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+    struct thread* now = list_entry(e, struct thread, allelem);
+    if(now != idle_thread){
+      now->recent_cpu = add_x_n(mul_x_y(div_x_y(mul_x_n(load_avg,2), add_x_n((mul_x_n(load_avg, 2)),1)),now->recent_cpu), now->nice);
+    }
+  }
+}
+
+void mlfqs_recent_cpu_increase(void) {
+  if(thread_current() != idle_thread){
+    thread_current()->recent_cpu = add_x_n(thread_current()->recent_cpu,1);
+  }
+}
+
+void mlfqs_load_avg(void) {
+  struct thread* now = thread_current();
+  int mid= mul_x_y(div_x_y(n_to_fp(59), n_to_fp(60)), load_avg);
+  int ready_threads;
+  if(now == idle_thread) {ready_threads=list_size(&ready_list);}
+  else {ready_threads=list_size(&ready_list)+1;}
+  load_avg = add_x_y(mid, mul_x_n(div_x_y(n_to_fp(1),n_to_fp(60)), ready_threads));
+}
 // END Lab 1. New functions implemented
 
 // Lab 1-1. Function edited 
@@ -240,6 +278,7 @@ void
 thread_start (void) 
 {
   /* Create the idle thread. */
+  load_avg=0; // Lab 1-3.
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
@@ -472,14 +511,13 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-// Lab 1-2. Function edited 
+// Lab 1-2. & Lab 1-3. Function edited
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->org_priority = new_priority;
-
-  priority_update();
+  if(!thread_mlfqs) {priority_update();} // Lab 1-3.
   thread_yield_on_priority(); // Lab 1-2. 
 }
 
@@ -490,36 +528,35 @@ thread_get_priority (void)
   return thread_current ()->priority;
 }
 
+// Lab 1-3. Function edited
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current()->nice=nice; // Lab 1-3.
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice; // Lab 1-3.
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return x_to_int_nearest(mul_x_n(load_avg,100)); // Lab 1-3. 
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return x_to_int_nearest(mul_x_n(thread_current()->recent_cpu,100)); // Lab 1-3.
 }
+// END Lab 1-3. Function edited
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -591,7 +628,7 @@ is_thread (struct thread *t)
   return t != NULL && t->magic == THREAD_MAGIC;
 }
 
-// Lab 1-2. Function edited
+// Lab 1-2. & 1-3. Function edited
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void
@@ -617,7 +654,8 @@ init_thread (struct thread *t, const char *name, int priority)
   // END Lab 1-2.
 
   // Lab 1-3.
-  
+  t->nice=0;
+  t->recent_cpu=0;
   // END Lab 1-3.
 
   old_level = intr_disable ();

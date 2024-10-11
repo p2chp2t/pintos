@@ -167,13 +167,24 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-// Lab 1-1. Function edited 
+// Lab 1-1. & 1-3. Function edited 
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  if(thread_mlfqs){   // Lab 1-3.
+    mlfqs_recent_cpu_increase();
+    if(ticks % 100 == 0) {
+      mlfqs_load_avg();
+      mlfqs_recent_cpu();
+    }
+    if(ticks % 4 == 0) {
+      mlfqs_priority();
+    }
+  }
   thread_awake(ticks); // Lab 1-1.
 }
 
