@@ -199,7 +199,11 @@ void priority_update(void)
   else {
     list_sort(&current_t->donation_list, compare_priority, NULL);
     struct thread *dona_head_t = list_entry(list_begin(&current_t->donation_list), struct thread, donation_elem);
-    current_t->priority = dona_head_t->priority;
+    
+    if(current_t->priority < dona_head_t->priority) {
+      current_t->priority = dona_head_t->priority;
+    }
+    return;
   }
 }
 
