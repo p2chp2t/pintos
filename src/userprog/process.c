@@ -21,6 +21,47 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Lab 2-2 Function added */
+/* store name and arguments in the user stack */
+void argument_stack(char **parse, int count, void **esp)
+{ 
+  int len_arg = 0;
+  for(int i=count-1; i>=0; i--) {
+    len_arg = strlen(parse[i]) + 1;
+    *esp -= len_arg + 1;
+    strlcpy(*esp, parse[i], len_arg+1);
+    parse[i] = *esp;
+  }
+
+  /* alignment */
+  if(((uint32_t)*esp) % 4 != 0) {
+    *esp -= ((uint32_t)*esp) % 4;
+  }
+
+  /* push NULL */
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+
+  /* push address */
+  for(int j=count-1; j>0; j--) {
+    *esp -= 4;
+    **(uint32_t **)esp = parse[j];
+  }
+
+  /* push the start address of parse */
+  *esp -= 4;
+  **(uint32_t **)esp = (*esp + 4);
+
+  /* push count (argc) */
+  *esp -= 4;
+  **(uint32_t **)esp = count;
+
+  /* push the return address */
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+}
+
+/* Lab 2-2 Function modified */
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -31,6 +72,11 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  /* Lab 2-2 */
+  char *fn_new;   // copy to parse
+  char *fn_name;  // name as the first token
+  char *fn_rest;  // rest of the command except name
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -38,13 +84,26 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  // make a copy to parse
+  fn_new = palloc_get_page(0);
+  if(fn_new == NULL) {
+    return TID_ERROR;
+  }
+  strlcpy(fn_new, file_name, PGSIZE);
+  fn_name = strtok_r(fn_new, " ", &fn_rest);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  //tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (fn_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page(fn_new);
+  /* END Lab 2-2 */
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
 }
 
+/* Lab 2-2 Function modified */
 /* A thread function that loads a user process and starts it
    running. */
 static void
@@ -54,13 +113,33 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  /* Lab 2-2 */
+  char *arg;    // now parsed argument
+  char *yet_parsed;   // arguement string not parsed yet
+  int arg_count = 0;  // number of parsed arguements
+  char **arg_list = palloc_get_page(0); // list of parsed arguements
+  
+  /* parse command */
+  for(arg = strtok_r(file_name, " ", &yet_parsed); arg != NULL; arg = strtok_r(NULL, " ", &yet_parsed)) {
+    arg_list[arg_count] = arg;
+    arg_count++;
+  }
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
-
+  //success = load (file_name, &if_.eip, &if_.esp);
+  
+  success = load(arg_list[0], &if_.eip, &if_.esp);
+  if(success) {
+    argument_stack(arg_list, arg_count, &if_.esp);
+  }
+  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  palloc_free_page(arg_list);
+  /* END Lab 2-2 */
+  
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
