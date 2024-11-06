@@ -140,7 +140,7 @@ void thread_yield_on_priority(void)
   if(list_empty(&ready_list)) {
     return;
   }
-  else {
+  else if(!intr_context()) {  // Lab 2-2 - Modified
     struct thread *cur = thread_current();
     struct thread *ready = list_entry(list_front(&ready_list), struct thread, elem);
     if(ready->priority > cur->priority) {
