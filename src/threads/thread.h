@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 
+/* Lab 2-3 Header added */
+#include "threads/synch.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -97,6 +100,20 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */ 
     uint32_t *pagedir;                  /* Page directory. */
+   
+   /* Lab 2-3 Variables added */
+   struct thread *parent;
+   struct list_elem child_elem;
+   struct list child_list;
+   int exit_status;
+   bool is_loaded;
+   int fd_num;
+   struct file **fd_table;
+   struct file* f_now;
+   struct semaphore sema_load;
+   struct semaphore sema_exit;
+   struct semaphore sema_wait;
+   /* END Lab 2-3 */
 #endif
 
     /* Owned by thread.c. */

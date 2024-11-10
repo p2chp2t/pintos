@@ -324,6 +324,7 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
+/* Lab 2-3 Function modified */
 // Lab 1-2. Function edited 
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
@@ -360,6 +361,21 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  /* Lab 2-3 */
+  #ifdef USERPROG
+    t->parent = thread_current();
+    list_push_back(&(t->parent->child_list), &(t->child_elem));
+    t->exit_status = -1;
+    t->is_loaded = false;
+    t->fd_num = 2;
+    t->fd_table = palloc_get_page(0);
+    if(t->fd_table==NULL) { return TID_ERROR; }
+    sema_init(&(t->sema_load), 0);
+    sema_init(&(t->sema_exit), 0);
+    sema_init(&(t->sema_wait), 0);
+  #endif
+  /* END Lab 2-3 */
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -457,6 +473,7 @@ thread_tid (void)
   return thread_current ()->tid;
 }
 
+/* Lab 2-3 Function modified */
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void
@@ -468,6 +485,15 @@ thread_exit (void)
   process_exit ();
 #endif
 
+  /* Lab 2-3 */
+  struct thread* now = thread_current();
+  sema_up(&(now->sema_wait));
+  for (struct list_elem *e = list_begin(&(now->child_list)); e != list_end(&(now->child_list));e = list_next(e)) {
+    sema_up(&(list_entry(e, struct thread, child_elem)->sema_exit));
+  }
+  sema_down(&(now->sema_exit));
+  /* END Lab 2-3 */
+  
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
@@ -632,6 +658,7 @@ is_thread (struct thread *t)
   return t != NULL && t->magic == THREAD_MAGIC;
 }
 
+/* Lab 2-3 Function modified */
 // Lab 1-2. & 1-3. Function edited
 /* Does basic initialization of T as a blocked thread named
    NAME. */
@@ -661,6 +688,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->nice=0;
   t->recent_cpu=0;
   // END Lab 1-3.
+
+  /* Lab 2-3 */
+  list_init(&(t->child_list));
+  /* END Lab 2-3 */
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
