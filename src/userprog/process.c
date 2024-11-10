@@ -17,49 +17,86 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+/* Lab 2-4 Header added */
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Lab 2-3 Variable added */
+extern struct lock f_lock;
+
 /* Lab 2-2 Function added */
 /* store name and arguments in the user stack */
-void argument_stack(char **parse, int count, void **esp)
+void argument_stack(char *file_name, void **esp)
 { 
-  int len_arg = 0;
-  for(int i=count-1; i>=0; i--) {
-    len_arg = strlen(parse[i]) + 1;
-    *esp -= len_arg + 1;
-    strlcpy(*esp, parse[i], len_arg+1);
-    parse[i] = *esp;
+  char *copied = palloc_get_page(0);
+  strlcpy(copied, file_name, strlen(file_name)+1);
+
+  char *an_arg;
+  char *rest;
+
+  char **arg_list = palloc_get_page(0);
+  char **arg_addr = palloc_get_page(0);
+  int arg_num = 0;
+
+  for(an_arg=strtok_r(copied, " ", &rest); an_arg != NULL ; an_arg = strtok_r(NULL, " ", &rest))
+  {
+    arg_list[arg_num] = an_arg;
+    arg_num++;
+  }
+  arg_list[arg_num] = NULL;
+    
+  // push arguments
+  int arg_size;
+  for (int i=arg_num-1; i>=0; i--) {
+    arg_size = strlen(arg_list[i]);
+    *esp -= arg_size+1;
+    strlcpy(*esp, arg_list[i], arg_size + 1);
+    arg_addr[i] = *esp;
   }
 
-  /* alignment */
-  if(((uint32_t)*esp) % 4 != 0) {
-    *esp -= ((uint32_t)*esp) % 4;
-  }
-
-  /* push NULL */
+  // align by 4
+  if (((uint32_t)*esp) % 4 !=0) {*esp -= ((uint32_t)*esp) % 4;}
+  
+  // push NULL
   *esp -= 4;
   **(uint32_t **)esp = 0;
 
-  /* push address */
-  for(int j=count-1; j>0; j--) {
+  // push addresses
+  for (int j=arg_num-1; j>=0; j--) {
     *esp -= 4;
-    **(uint32_t **)esp = parse[j];
+    **(uint32_t **)esp = arg_addr[j];
   }
 
-  /* push the start address of parse */
+  // push start address
   *esp -= 4;
   **(uint32_t **)esp = (*esp + 4);
 
-  /* push count (argc) */
+  // push numbers of the arguments
   *esp -= 4;
-  **(uint32_t **)esp = count;
+  **(uint32_t **)esp = arg_num;
 
-  /* push the return address */
+  // push the return address
   *esp -= 4;
   **(uint32_t **)esp = 0;
+
+  palloc_free_page(arg_list);
+  palloc_free_page(arg_addr);
+  palloc_free_page(copied);
 }
+
+/* Lab 2-3 Function added */
+struct thread* get_pd_child(pid_t pid) {
+  struct list *ch = &(thread_current()->child_list);
+  for (struct list_elem *e = list_begin(ch); e != list_end(ch) ; e = list_next(e)) {
+    if(list_entry(e, struct thread, child_elem)->tid == pid) {
+      return list_entry(e, struct thread, child_elem);
+    }
+  }
+  return NULL;
+}
+/* END Lab 2-3 */
 
 /* Lab 2-2 Function modified */
 /* Starts a new thread running a user program loaded from
@@ -73,9 +110,9 @@ process_execute (const char *file_name)
   tid_t tid;
 
   /* Lab 2-2 */
-  char *fn_new;   // copy to parse
-  char *fn_name;  // name as the first token
-  char *fn_rest;  // rest of the command except name
+  char *copied;
+  char *real_file_name;
+  char *rest;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -85,17 +122,14 @@ process_execute (const char *file_name)
   strlcpy (fn_copy, file_name, PGSIZE);
 
   // make a copy to parse
-  fn_new = palloc_get_page(0);
-  if(fn_new == NULL) {
-    return TID_ERROR;
-  }
-  strlcpy(fn_new, file_name, PGSIZE);
-  fn_name = strtok_r(fn_new, " ", &fn_rest);
+  copied = palloc_get_page (0);
+  strlcpy (copied, file_name, PGSIZE);
+  real_file_name = strtok_r(copied, " ", &rest);
 
   /* Create a new thread to execute FILE_NAME. */
   //tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  tid = thread_create (fn_name, PRI_DEFAULT, start_process, fn_copy);
-  palloc_free_page(fn_new);
+  tid = thread_create (real_file_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page(copied);
   /* END Lab 2-2 */
 
   if (tid == TID_ERROR)
@@ -103,7 +137,7 @@ process_execute (const char *file_name)
   return tid;
 }
 
-/* Lab 2-2 Function modified */
+/* Lab 2-2 & 2-3 Function modified */
 /* A thread function that loads a user process and starts it
    running. */
 static void
@@ -114,16 +148,11 @@ start_process (void *file_name_)
   bool success;
 
   /* Lab 2-2 */
-  char *arg;    // now parsed argument
-  char *yet_parsed;   // arguement string not parsed yet
-  int arg_count = 0;  // number of parsed arguements
-  char **arg_list = palloc_get_page(0); // list of parsed arguements
-  
-  /* parse command */
-  for(arg = strtok_r(file_name, " ", &yet_parsed); arg != NULL; arg = strtok_r(NULL, " ", &yet_parsed)) {
-    arg_list[arg_count] = arg;
-    arg_count++;
-  }
+  char *copied = palloc_get_page (0);
+  strlcpy (copied, file_name, PGSIZE);
+  char *real_file_name;
+  char *rest;
+  real_file_name = strtok_r(copied, " ", &rest);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -132,12 +161,14 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   //success = load (file_name, &if_.eip, &if_.esp);
   
-  success = load(arg_list[0], &if_.eip, &if_.esp);
+  success = load(real_file_name, &if_.eip, &if_.esp);
   if(success) {
-    argument_stack(arg_list, arg_count, &if_.esp);
+    argument_stack(file_name, &if_.esp);
+    thread_current()->is_loaded = true; // Lab 2-3
   }
-  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
-  palloc_free_page(arg_list);
+  sema_up(&(thread_current()->sema_load));  // Lab 2-3
+  //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  palloc_free_page(copied);
   /* END Lab 2-2 */
   
   /* If load failed, quit. */
@@ -155,6 +186,7 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+/* Lab 2-3 Function modified */
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -167,15 +199,35 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  struct thread *child = get_pd_child(child_tid);
+  if(child == NULL) {
+    return -1;
+  }
+  sema_down(&(child->sema_wait));
+  
+  int exit_status = child->exit_status;
+  list_remove(&(child->child_elem));
+
+  sema_up(&(child->sema_exit));
+  return exit_status;
 }
 
+/* Lab 2-3 Function modified */
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Lab 2-3 */
+  for(int i = 2; i < cur->fd_num; i++) {
+    syscall_close(i);
+  }
+  palloc_free_page(cur->fd_table);
+
+  file_close(cur->f_now);
+  /* END Lab 2-3 */
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -280,6 +332,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+/* Lab 2-4 Function modified */
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -300,13 +353,19 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  /* Lab 2-4 */
+  lock_acquire(&f_lock);    // Lab 2-4
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
-    {
+    { 
       printf ("load: %s: open failed\n", file_name);
+      lock_release(&f_lock);  // Lab 2-4
       goto done; 
     }
+  t->f_now = file;             // Lab 2-4
+  file_deny_write(file);          // Lab 2-4
+  lock_release(&f_lock);    // Lab 2-4
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -391,7 +450,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);    // Lab 2-4
   return success;
 }
 
