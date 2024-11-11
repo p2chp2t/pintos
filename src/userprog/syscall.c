@@ -9,6 +9,8 @@
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "userprog/process.h"
+#include "devices/input.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -29,7 +31,6 @@ void get_args(void *esp, int *arg, int count) {
 }
 
 struct file *get_fd_file(int fd) {
-  struct file *f;
   if( (2 <= fd) && (fd < thread_current()->fd_num) ) {
     return thread_current()->fd_table[fd];
   }
@@ -81,7 +82,7 @@ int syscall_wait(pid_t pid)
 
 bool syscall_create(const char *file, unsigned initial_size)
 {
-  addr_check(file);
+  addr_check((void*)file);
   if(file == NULL) {
     syscall_exit(-1);
   }
@@ -96,7 +97,7 @@ bool syscall_remove(const char *file)
 
 int syscall_open(const char *file)
 {
-  addr_check(file);
+  addr_check((void*)file);
   lock_acquire(&f_lock);
 
   struct file* f = filesys_open(file);
@@ -157,7 +158,7 @@ int syscall_read(int fd, void *buffer, unsigned size, void *esp)
 int syscall_write(int fd, const void *buffer, unsigned size, void *esp)
 {
   for(int i = 0; i < size; i++) {
-    addr_check(buffer + i);
+    addr_check((void*)buffer + i);
   }
   int w_bytes = 0;
   if(fd == 1) {
