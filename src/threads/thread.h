@@ -7,6 +7,8 @@
 
 /* Lab 2-3 Header added */
 #include "threads/synch.h"
+/* Lab 3-3 Header added */
+#include <hash.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -96,7 +98,10 @@ struct thread
     int64_t tick_wakeup;                /* the tick time when the thread should wake up */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-
+    // Lab 3 Variable added
+    struct hash vm;
+    struct list mmap_list;
+    int mmap_next;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */ 
     uint32_t *pagedir;                  /* Page directory. */

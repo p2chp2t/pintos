@@ -11,16 +11,23 @@
 #include "filesys/file.h"
 #include "userprog/process.h"
 #include "devices/input.h"
+/* Lab 3-5 Header added */
+#include "vm/frame.h"
+#include "vm/page.h"
+#include <list.h>
 
 static void syscall_handler (struct intr_frame *);
 
 /* Lab 2-3 Variable added */
 struct lock f_lock;
+/* Lab 3-5 Variable added */
+extern struct lock frame_lock;
 
-/* Lab 2-3 Function added */
+/* Lab 2-3 Function added & 3-4 modified */
 void addr_check(void *addr) { 
-  if (!is_user_vaddr(addr)|| !pagedir_get_page(thread_current()->pagedir, addr)) 
+  if(!addr || !is_user_vaddr(addr)) {
     syscall_exit(-1);
+  }
 }
 
 void get_args(void *esp, int *arg, int count) {
@@ -51,7 +58,7 @@ void syscall_exit(int status)
   thread_exit();
 }
 
-pid_t syscall_exec(const char *cmd_line)
+pid_t syscall_exec(const char *cmd_line, void* esp)
 { 
   char *c = cmd_line;
   while (true) {
@@ -81,18 +88,24 @@ int syscall_wait(pid_t pid)
 }
 
 bool syscall_create(const char *file, unsigned initial_size)
-{
+{ 
   addr_check((void*)file);
   if(file == NULL) {
     syscall_exit(-1);
-  }
-  return filesys_create(file, initial_size);
+  }  
+  lock_acquire(&f_lock);
+  bool success = filesys_create(file, initial_size);
+  lock_release(&f_lock);
+  return success;
 }
 
 bool syscall_remove(const char *file)
-{
+{ 
   addr_check((void*)file);
-  return filesys_remove(file);
+  lock_acquire(&f_lock);
+  bool success = filesys_remove(file);
+  lock_release(&f_lock);
+  return success;
 }
 
 int syscall_open(const char *file)
@@ -120,12 +133,15 @@ int syscall_open(const char *file)
 }
 
 int syscall_filesize(int fd)
-{
+{ 
   struct file *f = get_fd_file(fd);
   if(f == NULL) {
     return -1;
   }
-  return file_length(f);  // return filesize
+  lock_acquire(&f_lock);
+  int size = file_length(f);  // return filesize
+  lock_release(&f_lock);
+  return size;
 }
 
 int syscall_read(int fd, void *buffer, unsigned size, void *esp)
@@ -133,6 +149,8 @@ int syscall_read(int fd, void *buffer, unsigned size, void *esp)
   for (int i = 0; i < size; i++){
     addr_check(buffer+i);
   }
+  // pin & unpin
+  pin_buffer(buffer, size, esp);
   int r_bytes = 0; // bytes read
   if(fd==0) { // if fd is 0, not file. console
     for (int j = 0; j < size; j++) {
@@ -152,31 +170,40 @@ int syscall_read(int fd, void *buffer, unsigned size, void *esp)
     r_bytes = file_read(f, buffer, size);
     lock_release(&f_lock);
   }
+  unpin_buffer(buffer, size);
+
   return r_bytes;
 }
 
 int syscall_write(int fd, const void *buffer, unsigned size, void *esp)
 {
-  for(int i = 0; i < size; i++) {
-    addr_check((void*)buffer + i);
+  for (int i = 0; i < size; i++) {
+    addr_check(buffer+i);
   }
+  // pin & unpin
+  pin_buffer(buffer, size, esp);
   int w_bytes = 0;
-  if(fd == 1) {
+  if(fd == 1)
+  {
     lock_acquire(&f_lock);
     putbuf(buffer, size);
     lock_release(&f_lock);
     w_bytes = size;
   }
-  else if(fd > 1) {
-    struct file* f = get_fd_file(fd);
-    if(f==NULL) {
+  else if(fd > 1)
+  {
+    struct file *f = get_fd_file(fd);
+    if(!f) {
       return -1;
     }
     lock_acquire(&f_lock);
-    w_bytes = file_write(f, buffer, size);
+    w_bytes += file_write(f, buffer, size);
     lock_release(&f_lock);
- }
- return w_bytes;
+  }
+  unpin_buffer(buffer, size);
+
+  return w_bytes;
+
 }
 
 void syscall_seek(int fd, unsigned position)
@@ -190,11 +217,17 @@ void syscall_seek(int fd, unsigned position)
 
 unsigned syscall_tell(int fd)
 {
+  unsigned position;
   struct file *f = get_fd_file(fd);
+  lock_acquire(&f_lock);
   if (f) {
-    return file_tell(f);
+    position = file_tell(f);
   }
-  return 0;
+  else {
+    position = 0;
+  }
+  lock_release(&f_lock);
+  return position;
 }
 
 void syscall_close(int fd)
@@ -219,7 +252,7 @@ syscall_init (void)
   lock_init(&f_lock);
 }
 
-/* Lab 2-3 Function modified */
+/* Lab 2-3 & 3-5 Function modified */
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -229,7 +262,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   for(int i = 0; i < 3; i++) {
     addr_check(f->esp + 4*i);
   }
-
   int argv[3];
   switch(*(uint32_t *)(f->esp)) {
     case SYS_HALT:
@@ -241,7 +273,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_EXEC:
       get_args(f->esp+4, &argv[0], 1);
-      f->eax = syscall_exec((const char*)argv[0]);
+      f->eax = syscall_exec((const char*)argv[0], f->esp);
       break;
     case SYS_WAIT:
       get_args(f->esp+4, &argv[0], 1);
@@ -283,7 +315,180 @@ syscall_handler (struct intr_frame *f UNUSED)
       get_args(f->esp+4, &argv[0], 1);
       syscall_close((int)argv[0]);
       break;
+    /* Lab 3-5 */
+    case SYS_MMAP:
+      get_args(f->esp+4, &argv[0], 2);
+      f->eax = syscall_mmap(argv[0], (void*)argv[1]);
+      break;
+    case SYS_MUNMAP:
+      get_args(f->esp+4, argv, 1);
+      syscall_munmap(argv[0]);
+      break;
+    /* END Lab 3-5 */
     default:
       syscall_exit(-1);
+  }
+}
+
+/* Lab 3-5 Function added */
+mapid_t syscall_mmap(int fd, void* addr)
+{
+  if(!addr || !is_user_vaddr(addr) || pg_ofs(addr) != 0) {
+    return -1;
+  }
+
+  struct file *f = get_fd_file(fd);
+  if(f == NULL) {
+    return -1;
+  }
+  size_t offset = 0;
+
+  // allocate and initalize mmf
+  struct mmap_file *mmf;
+  mmf = (struct mmap_file*)malloc(sizeof(struct mmap_file));
+  if(mmf == NULL) {
+    return -1;
+  }
+  memset(mmf, 0, sizeof(struct mmap_file));
+
+  struct thread *t = thread_current();
+  mmf->mapid = t->mmap_next++;
+  list_push_back(&t->mmap_list, &mmf->elem);
+
+  lock_acquire(&f_lock);
+  mmf->file = file_reopen(f);
+  lock_release(&f_lock);
+  
+  list_init(&mmf->vme_list);
+  int _file_length = file_length(mmf->file);
+  while(_file_length > 0) {
+    if(find_vme(addr)) {
+      return -1;
+    }
+    struct vm_entry *vme = (struct vm_entry *)malloc(sizeof(struct vm_entry));
+    if(!vme) {
+      return -1;
+    }
+    memset(vme, 0, sizeof(struct vm_entry));
+
+    size_t _read_bytes = _file_length < PGSIZE ? _file_length : PGSIZE;
+    size_t _zero_bytes = PGSIZE - _read_bytes;
+
+    vme->type = VM_FILE;
+    vme->vaddr = addr;   
+    vme->writable = true;
+    vme->is_loaded = false;
+    vme->file = mmf->file;
+    vme->offset = offset;
+    vme->read_bytes = _read_bytes;
+    vme->zero_bytes = _zero_bytes;
+    
+    list_push_back(&mmf->vme_list, &vme->mmap_elem);
+    insert_vme(&t->vm, vme);
+
+    addr += PGSIZE;
+    offset += PGSIZE;
+    _file_length -= PGSIZE;
+  }
+
+  return mmf->mapid;
+}
+
+void syscall_munmap(mapid_t mapid)
+{
+  struct mmap_file *mmf = NULL;
+  struct thread *t = thread_current();
+  struct list_elem *e;
+  for(e = list_begin(&t->mmap_list); e != list_end(&t->mmap_list); e = list_next(e)) {
+    mmf = list_entry(e, struct mmap_file, elem);
+    if(mmf->mapid == mapid) {
+      break;
+    }
+  }
+  if(mmf == NULL) { // no such mmap file
+    return;
+  }
+  // remove all vm_entry in vme_list
+  for(e = list_begin(&mmf->vme_list); e != list_end(&mmf->vme_list); ) {
+    struct vm_entry *vme = list_entry(e, struct vm_entry, mmap_elem);
+    if(vme->is_loaded && pagedir_is_dirty(t->pagedir, vme->vaddr)) {
+      lock_acquire(&f_lock);
+      file_write_at(vme->file, vme->vaddr, vme->read_bytes, vme->offset);
+      lock_release(&f_lock);
+
+      lock_acquire(&frame_lock);
+      free_frame(pagedir_get_page(t->pagedir, vme->vaddr));
+      lock_release(&frame_lock);
+    }
+    vme->is_loaded = false;
+    e = list_remove(e);
+    delete_vme(&t->vm, vme);
+  }
+  list_remove(&mmf->elem);
+  free(mmf);
+}
+/* END Lab 3-5 */
+
+// for pinning
+void pin_buffer(void *buffer, int size, void *esp)
+{
+  void *ptr = buffer;     // buffer pointer
+  size_t cur_size = size; 
+
+  while (cur_size > 0) {
+    struct vm_entry *vme = find_vme(pg_round_down(ptr));
+    if(vme) {
+      if(!vme->is_loaded) {
+        if(!handle_mm_fault(vme)) {
+          syscall_exit(-1);
+        }
+      }
+    }
+    else {
+      if(!verify_stack(ptr, esp)) {
+        syscall_exit(-1);
+      }
+      if(!expand_stack(ptr)) {
+        syscall_exit(-1);
+      }
+    }
+     
+    lock_acquire(&frame_lock);
+    struct frame *f = find_frame(pg_round_down(ptr));
+    if(!f) {
+      lock_release(&frame_lock);
+      syscall_exit(-1);
+    }
+    else {
+      pin_frame(f->phy_addr);
+    }
+    lock_release(&frame_lock);
+
+    size_t pinned = cur_size > PGSIZE - pg_ofs(ptr) ? PGSIZE - pg_ofs(ptr) : cur_size;
+    ptr += pinned;
+    cur_size -= pinned;
+  }
+}
+
+void unpin_buffer(void *buffer, int size)
+{
+  void *ptr = buffer;     // buffer pointer
+  size_t cur_size = size; 
+
+  while (cur_size > 0) {
+    lock_acquire(&frame_lock);
+    struct frame *f = find_frame(pg_round_down(ptr));
+    if(!f) {
+      lock_release(&frame_lock);
+      syscall_exit(-1);
+    }
+    else {
+      unpin_frame(f->phy_addr);
+    }
+    lock_release(&frame_lock);
+
+    size_t unpinned = cur_size > PGSIZE - pg_ofs(ptr) ? PGSIZE - pg_ofs(ptr) : cur_size;
+    ptr += unpinned;
+    cur_size -= unpinned;
   }
 }

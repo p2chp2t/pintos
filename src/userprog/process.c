@@ -20,11 +20,18 @@
 /* Lab 2-4 Header added */
 #include "userprog/syscall.h"
 
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Lab 2-3 Variable added */
 extern struct lock f_lock;
+/* Lab 3-2 Variable added */
+extern struct lock frame_lock;
+
 
 /* Lab 2-2 Function added */
 /* store name and arguments in the user stack */
@@ -137,7 +144,7 @@ process_execute (const char *file_name)
   return tid;
 }
 
-/* Lab 2-2 & 2-3 Function modified */
+/* Lab 2-2 & 2-3 & 3-3 Function modified */
 /* A thread function that loads a user process and starts it
    running. */
 static void
@@ -146,6 +153,10 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+
+  /* Lab 3-3 */
+  vm_init(&thread_current()->vm);
+  /* END Lab 3-3 */
 
   /* Lab 2-2 */
   char *copied = palloc_get_page (0);
@@ -212,7 +223,7 @@ process_wait (tid_t child_tid UNUSED)
   return exit_status;
 }
 
-/* Lab 2-3 Function modified */
+/* Lab 2-3 & 3-7 Function modified */
 /* Free the current process's resources. */
 void
 process_exit (void)
@@ -228,6 +239,12 @@ process_exit (void)
 
   file_close(cur->f_now);
   /* END Lab 2-3 */
+
+  /* Lab 3-7 */
+  for (int i = 1 ; i<cur->mmap_next ;i++)
+    syscall_munmap(i);
+  vm_destroy(&cur->vm);
+  /* END Lab 3-7 */
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -503,6 +520,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
   return true;
 }
 
+/* Lab 3-2 Function modified */
 /* Loads a segment starting at offset OFS in FILE at address
    UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
    memory are initialized, as follows:
@@ -517,6 +535,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
+
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -534,30 +553,29 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
+      // code removed 
+
+      /* Lab 3-2 */
+      struct vm_entry *vme = (struct vm_entry *)malloc(sizeof(struct vm_entry));
+      if(!vme) {
         return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-
+      }
+      memset(vme, 0, sizeof(struct vm_entry));
+      vme->type = VM_BIN;
+      vme->vaddr = upage;
+      vme->writable = writable;
+      vme->is_loaded = false;
+      vme->file = file;
+      vme->offset = ofs;
+      vme->read_bytes = page_read_bytes;
+      vme->zero_bytes = page_zero_bytes;
+      insert_vme(&thread_current()->vm, vme);
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
+      /* END Lab 3-2 */
     }
   return true;
 }
@@ -567,18 +585,37 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
-
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
+  lock_acquire(&frame_lock);
+  struct frame* frame = allocate_frame(PAL_USER | PAL_ZERO);
+  bool success=false;
+  if (frame->phy_addr != NULL) {
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, frame->phy_addr, true);
+      if (success) {
+	        struct vm_entry* vme = (struct vm_entry*)malloc(sizeof(struct vm_entry));
+	        if (!vme) 
+		        return NULL;
+	        memset(vme, 0, sizeof(struct vm_entry));
+        	vme->type = VM_ANON;
+	        vme->vaddr = ((uint8_t *)PHYS_BASE) - PGSIZE;
+	        vme->writable = true;
+	        vme->is_loaded = true;
+	        vme->file = NULL;
+	        vme->offset = NULL;
+	        vme->read_bytes = 0;
+	        vme->zero_bytes = 0;
+          frame->frame_mapped_page=vme;
+          if (!frame->frame_mapped_page) {
+            lock_release(&frame_lock);
+            return false;
+          }
+          insert_vme(&thread_current()->vm, frame->frame_mapped_page);
+          *esp = PHYS_BASE;
+        } 
+      else {
+        free_frame (frame->phy_addr);
+      }
     }
+  lock_release(&frame_lock);
   return success;
 }
 
@@ -601,3 +638,111 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+/* Lab 3-2 Function added */
+bool handle_mm_fault(struct vm_entry *vme)
+{
+  lock_acquire(&frame_lock);
+  struct frame *f = allocate_frame(PAL_USER);
+  f->frame_mapped_page = vme;
+  bool success = false;
+  // load to the physical memory
+  switch(vme->type) {
+    case VM_BIN:
+      success = load_file(f->phy_addr, vme);
+      break;
+    case VM_FILE:
+      success = load_file(f->phy_addr, vme);
+      break;
+    case VM_ANON:
+      success = swap_in(vme->swap_slot, f->phy_addr);
+      break;
+    default:
+      lock_release(&frame_lock);
+      return false;
+  }
+  if(!success) {
+    free_frame(f->phy_addr);
+    lock_release(&frame_lock);
+    return false;
+  }
+  // mapping
+  if(!install_page(vme->vaddr, f->phy_addr, vme->writable)) {
+    free_frame(f->phy_addr);
+    lock_release(&frame_lock);
+    return false;
+  }
+  // successfully loaded & mapped
+  vme->is_loaded = true;
+  lock_release(&frame_lock);
+  return true;
+}
+
+bool load_file(void *kaddr, struct vm_entry *vme)
+{ 
+  lock_acquire(&f_lock);  
+  int read_bytes = file_read_at(vme->file, kaddr, vme->read_bytes, vme->offset);
+  lock_release(&f_lock);
+  if(read_bytes != (int)vme->read_bytes) {
+    return false;
+  }
+  memset(kaddr + vme->read_bytes, 0, vme->zero_bytes);
+  return true;
+}
+/* END Lab 3-2 */
+
+/* Lab 3-4 Function added */
+bool verify_stack(void *addr, void *esp)
+{
+  uint32_t base = 0xC0000000;
+  uint32_t limit = 0x80000000;
+  if(!is_user_vaddr(addr) || addr < base - limit || addr < esp - 32) {
+    return false;
+  }
+  else {
+    return true;
+  }
+}
+
+bool expand_stack(void *addr)
+{
+	void *upage = pg_round_down(addr);
+  lock_acquire(&frame_lock);
+	struct frame *frame = allocate_frame(PAL_USER | PAL_ZERO);
+  bool is_mapped = false;
+	if (frame) {
+    is_mapped = install_page(upage, frame->phy_addr, true);
+    if (!is_mapped) {
+      free_frame(frame->phy_addr);
+      lock_release(&frame_lock);
+      return is_mapped;
+    }
+    else {
+      struct vm_entry* vme = (struct vm_entry*)malloc(sizeof(struct vm_entry));
+    	if (!vme) 
+		    return NULL;
+	    memset(vme, 0, sizeof(struct vm_entry));
+	    vme->type = VM_ANON;
+	    vme->vaddr = upage;
+	    vme->writable = true;
+	    vme->is_loaded = true;
+	    vme->file = NULL;
+	    vme->offset = NULL;
+	    vme->read_bytes = 0;
+	    vme->zero_bytes = 0;
+      frame->frame_mapped_page= vme;
+      if (!frame->frame_mapped_page) {
+        lock_release(&frame_lock);
+        return false;
+      }
+      insert_vme(&thread_current()->vm, frame->frame_mapped_page);
+      lock_release(&frame_lock);
+      return is_mapped;
+    }
+  }
+	else {
+    lock_release(&frame_lock);
+    return is_mapped;
+  }
+}
+/* END Lab 3-4 */

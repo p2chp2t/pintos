@@ -6,12 +6,18 @@
 #include "threads/thread.h"
 /* Lab 2-3 Header added */
 #include "userprog/syscall.h"
-
+/* Lab 3-2 Header added */
+#include "threads/vaddr.h"
+#include "userprog/process.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
+extern struct lock frame_lock;
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -110,7 +116,7 @@ kill (struct intr_frame *f)
     }
 }
 
-/* Lab 2-3 Function modified */
+/* Lab 2-3 & 3-2 Function modified */
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -151,20 +157,40 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-   /* Lab 2-3 */
+   /* Lab 2-3 
    if(user) {
       syscall_exit(-1);
    }
-   /* END Lab 2-3 */
+   END Lab 2-3 */
 
+   /* Lab 3-2 */
+   if(!not_present) {
+      syscall_exit(-1);
+   }
+   struct vm_entry *vme = find_vme(fault_addr);
+   if(vme) {
+      if(!handle_mm_fault(vme)) {
+         syscall_exit(-1);
+      }
+   }
+   else {
+      if(!verify_stack(fault_addr, f->esp)) {
+         syscall_exit(-1);
+      }
+      if(!expand_stack(fault_addr)) {
+         syscall_exit(-1);
+      }
+      return;
+   }
+   /* END Lab 3-2 */
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
-     which fault_addr refers. */
+     which fault_addr refers. 
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
+  kill (f);*/
 }
 
